@@ -126,26 +126,32 @@ class XhhPlugin(Star):
     async def xhh_no(self, event: AstrMessageEvent):
         group_id = str(getattr(event, "group_id", None) or event.get_group_id())
         self._load_store_data(group_id)
-
+    
         bot = getattr(event, "bot", None)
         if not bot:
             yield event.plain_result("❌ 无法获取 Bot 实例")
             return
-
+    
         try:
             members = await bot.get_group_member_list(group_id=int(group_id))
         except Exception as e:
             logger.error(f"获取群成员失败: {e}")
             yield event.plain_result("❌ 获取群成员失败，可能权限不足")
             return
-
-        all_member_dict = {str(m.get("user_id")): m.get("nickname", "") for m in members if m.get("user_id")}
+    
+        bot_qq = str(getattr(event, "self_id", None) or getattr(bot, "self_id", ""))  # 机器人的 QQ
+        all_member_dict = {
+            str(m.get("user_id")): m.get("nickname", "")
+            for m in members
+            if m.get("user_id") and str(m.get("user_id")) != bot_qq  # 排除机器人自己
+        }
+    
         not_in_list = {f"{name}({qq})" for qq, name in all_member_dict.items() if qq not in self.qq_list}
-
+    
         if not not_in_list:
             yield event.plain_result("🎉 当前群所有成员都已加入小红花名单")
             return
-
+    
         yield event.plain_result("📌 未加入小红花名单的成员：\n" + "\n".join(sorted(not_in_list)))
 
     async def terminate(self):
