@@ -10,34 +10,44 @@ class XhhPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
+        # 数据目录 & 文件
         data_dir = StarTools.get_data_dir("astrbot_plugin_xhh")
         self.store_path = data_dir / "qq_store.json"
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not self.store_path.exists():
-            self.store_path.write_text('{"qq_list": {}}', encoding="utf-8")
+            self.store_path.write_text("{}", encoding="utf-8")
 
-        # 使用字典存储：qq -> 名称
+        # 当前群的 QQ 数据
         self.qq_list: dict[str, str] = {}
-        self._load_store_data()
+        self.current_group_id: str | None = None
 
     # ================== 数据读写 ==================
-    def _load_store_data(self):
+    def _load_store_data(self, group_id: str):
+        """按群加载 QQ 数据"""
+        self.current_group_id = group_id
         try:
             data = json.loads(self.store_path.read_text(encoding="utf-8"))
-            qqs = data.get("qq_list", {})
-            if isinstance(qqs, dict):
-                self.qq_list = {str(k): str(v) for k, v in qqs.items()}
-        except Exception as e:
-            logger.error(f"xhh 数据加载失败，已重置: {e}")
+            group_data = data.get(group_id, {}).get("qq_list", {})
+            self.qq_list = {str(k): str(v) for k, v in group_data.items()}
+        except Exception:
             self.qq_list = {}
-            self._save_store_data()
 
     def _save_store_data(self):
+        """保存当前群的 QQ 数据"""
+        if not self.current_group_id:
+            return
+
         try:
+            try:
+                data = json.loads(self.store_path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+
+            data[self.current_group_id] = {"qq_list": self.qq_list}
             self.store_path.write_text(
-                json.dumps({"qq_list": self.qq_list}, ensure_ascii=False, indent=2),
-                encoding="utf-8"
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
         except Exception as e:
             logger.error(f"xhh 数据保存失败: {e}")
@@ -55,10 +65,13 @@ class XhhPlugin(Star):
     # ================== list 指令 ==================
     @filter.command("xhh list")
     async def xhh_list(self, event: AstrMessageEvent):
+        group_id = str(getattr(event, "group_id", None) or event.get_group_id())
+        self._load_store_data(group_id)
+
         if not self.qq_list:
             yield event.plain_result("📭 当前还没有保存任何 QQ 号")
             return
-        # 展示为 名称(QQ号)
+
         display = "\n".join(f"{name}({qq})" for qq, name in sorted(self.qq_list.items()))
         yield event.plain_result(f"📋 已保存 QQ 列表：\n{display}")
 
@@ -67,23 +80,35 @@ class XhhPlugin(Star):
     @filter.permission_type(PermissionType.ADMIN)
     async def xhh_add(self, event: AstrMessageEvent):
         args = (event.message_str or "").split()
-        if len(args) < 4:
-            yield event.plain_result("❌ 用法：/xhh add 名称 QQ号")
+        if len(args) < 2:
+            yield event.plain_result("❌ 用法：/xhh add 名称 QQ号 或 /xhh add QQ号")
             return
 
-        name = args[2]
-        qqs_to_add = [qq for qq in args[3:] if qq.isdigit()]
-        if not qqs_to_add:
-            yield event.plain_result("❌ QQ 号必须是纯数字")
-            return
+        group_id = str(getattr(event, "group_id", None) or event.get_group_id())
+        self._load_store_data(group_id)
 
+        bot = getattr(event, "bot", None)
         added, skipped = [], []
-        for qq in qqs_to_add:
+
+        for qq in args[2:]:
+            if not qq.isdigit():
+                continue
+
             if qq in self.qq_list:
                 skipped.append(f"{self.qq_list[qq]}({qq})")
-            else:
-                self.qq_list[qq] = name
-                added.append(f"{name}({qq})")
+                continue
+
+            # 尝试自动获取名称
+            name = "未知"
+            if bot:
+                try:
+                    member = await bot.get_group_member_info(group_id=int(group_id), user_id=int(qq))
+                    name = member.get("nickname", "未知") if member else "未知"
+                except Exception:
+                    name = "未知"
+
+            self.qq_list[qq] = name
+            added.append(f"{name}({qq})")
 
         self._save_store_data()
 
@@ -99,10 +124,8 @@ class XhhPlugin(Star):
     @filter.command("xhh no")
     @filter.permission_type(PermissionType.ADMIN)
     async def xhh_no(self, event: AstrMessageEvent):
-        group_id = getattr(event, "group_id", None) or event.get_group_id()
-        if not group_id:
-            yield event.plain_result("❌ 该指令只能在群聊中使用")
-            return
+        group_id = str(getattr(event, "group_id", None) or event.get_group_id())
+        self._load_store_data(group_id)
 
         bot = getattr(event, "bot", None)
         if not bot:
@@ -110,13 +133,12 @@ class XhhPlugin(Star):
             return
 
         try:
-            members = await bot.get_group_member_list(group_id=group_id)
+            members = await bot.get_group_member_list(group_id=int(group_id))
         except Exception as e:
             logger.error(f"获取群成员失败: {e}")
             yield event.plain_result("❌ 获取群成员失败，可能权限不足")
             return
 
-        # 名称(QQ号)格式
         all_member_dict = {str(m.get("user_id")): m.get("nickname", "") for m in members if m.get("user_id")}
         not_in_list = {f"{name}({qq})" for qq, name in all_member_dict.items() if qq not in self.qq_list}
 
