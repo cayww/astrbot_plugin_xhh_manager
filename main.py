@@ -5,7 +5,7 @@ from astrbot.api import logger
 from astrbot.core.star.filter.permission import PermissionType
 
 
-@register("xhh_plugin", "cay", "小红花管理插件", "1.0.0")
+@register("astrbot_plugin_xhh_manager", "cay", "小红花管理插件", "1.0.0")
 class XhhPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -53,12 +53,16 @@ class XhhPlugin(Star):
             logger.error(f"xhh 数据保存失败: {e}")
 
     # ================== 帮助指令 ==================
+
+    @filter.command("xhh")
     @filter.command("xhh help")
     async def xhh_help(self, event: AstrMessageEvent):
         yield event.plain_result(
             "📌 小红花指令帮助\n"
             "/xhh list        查看已保存 QQ\n"
-            "/xhh add 名称 QQ号    添加 QQ（管理员）\n"
+            "/xhh has QQ号    查看指定QQ是否已添加\n"
+            "/xhh del QQ号    删除 QQ（管理员）\n"
+            "/xhh add QQ号    添加 QQ（管理员）\n"
             "/xhh no          查看未加入名单的群成员（管理员）"
         )
 
@@ -154,5 +158,62 @@ class XhhPlugin(Star):
     
         yield event.plain_result("📌 未加入小红花名单的成员：\n" + "\n".join(sorted(not_in_list)))
 
+    # ================== del 指令 ==================
+    @filter.command("xhh del")
+    @filter.command("xhh delete")
+    @filter.permission_type(PermissionType.ADMIN)
+    async def xhh_del(self, event: AstrMessageEvent):
+        args = (event.message_str or "").split()
+        if len(args) < 2:
+            yield event.plain_result("❌ 用法：/xhh del QQ号")
+            return
+
+        group_id = str(getattr(event, "group_id", None) or event.get_group_id())
+        self._load_store_data(group_id)
+
+        removed, not_found = [], []
+
+        for qq in args[2:]:
+            if not qq.isdigit():
+                continue
+
+            if qq in self.qq_list:
+                name = self.qq_list.pop(qq)
+                removed.append(f"{name}({qq})")
+            else:
+                not_found.append(qq)
+
+        if removed:
+            self._save_store_data()
+
+        msg = ""
+        if removed:
+            msg += f"🗑️ 已删除：{'，'.join(removed)}\n"
+        if not_found:
+            msg += f"⚠️ 未找到：{'，'.join(not_found)}"
+
+        yield event.plain_result(msg.strip())
+
+    # ================== has 指令 ==================
+    @filter.command("xhh has")
+    async def xhh_has(self, event: AstrMessageEvent):
+        args = (event.message_str or "").split()
+        if len(args) < 2:
+            yield event.plain_result("❌ 用法：/xhh has QQ号")
+            return
+
+        qq = args[2] if len(args) > 2 else None
+        if not qq or not qq.isdigit():
+            yield event.plain_result("❌ 请提供正确的 QQ 号")
+            return
+
+        group_id = str(getattr(event, "group_id", None) or event.get_group_id())
+        self._load_store_data(group_id)
+
+        if qq in self.qq_list:
+            name = self.qq_list[qq]
+            yield event.plain_result(f"✅ {name}({qq}) 已在小红花名单中")
+        else:
+            yield event.plain_result(f"❌ QQ({qq}) 不在小红花名单中")
     async def terminate(self):
         logger.info("xhh 插件已卸载")
