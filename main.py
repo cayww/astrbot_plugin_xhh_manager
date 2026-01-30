@@ -53,17 +53,16 @@ class XhhPlugin(Star):
             logger.error(f"xhh 数据保存失败: {e}")
 
     # ================== 帮助指令 ==================
-
-    @filter.command("xhh")
     @filter.command("xhh help")
     async def xhh_help(self, event: AstrMessageEvent):
         yield event.plain_result(
-            "📌 小红花指令帮助\n"
-            "/xhh list        查看已保存 QQ\n"
-            "/xhh has QQ号    查看指定QQ是否已添加\n"
-            "/xhh del QQ号    删除 QQ（管理员）\n"
-            "/xhh add QQ号    添加 QQ（管理员）\n"
-            "/xhh no          查看未加入名单的群成员（管理员）"
+            """📋 小红花管理插件帮助
+--------------------
+/xhh list        查看已保存 QQ
+/xhh has QQ号    查看指定QQ是否已添加
+/xhh del QQ号    删除 QQ（管理员）
+/xhh add QQ号    添加 QQ（管理员）
+/xhh no          查看未加入名单的群成员（管理员）"""
         )
 
     # ================== list 指令 ==================
@@ -84,46 +83,62 @@ class XhhPlugin(Star):
     @filter.permission_type(PermissionType.ADMIN)
     async def xhh_add(self, event: AstrMessageEvent):
         args = (event.message_str or "").split()
-        if len(args) < 2:
-            yield event.plain_result("❌ 用法：/xhh add 名称 QQ号 或 /xhh add QQ号")
+        if len(args) < 3:
+            yield event.plain_result("❌ 用法：/xhh add QQ号 [QQ号...]")
             return
 
         group_id = str(getattr(event, "group_id", None) or event.get_group_id())
         self._load_store_data(group_id)
 
         bot = getattr(event, "bot", None)
-        added, skipped = [], []
+        if not bot:
+            yield event.plain_result("❌ 无法获取 Bot 实例")
+            return
 
+        # ① 获取当前群成员 QQ 列表
+        try:
+            members = await bot.get_group_member_list(group_id=int(group_id))
+            group_member_map = {
+                str(m.get("user_id")): m.get("nickname", "未知")
+                for m in members
+                if m.get("user_id")
+            }
+        except Exception as e:
+            logger.error(f"获取群成员失败: {e}")
+            yield event.plain_result("❌ 获取群成员失败，可能权限不足")
+            return
+
+        added, skipped, not_in_group = [], [], []
+
+        # ② 校验 QQ
         for qq in args[2:]:
             if not qq.isdigit():
+                continue
+
+            if qq not in group_member_map:
+                not_in_group.append(qq)
                 continue
 
             if qq in self.qq_list:
                 skipped.append(f"{self.qq_list[qq]}({qq})")
                 continue
 
-            # 尝试自动获取名称
-            name = "未知"
-            if bot:
-                try:
-                    member = await bot.get_group_member_info(group_id=int(group_id), user_id=int(qq))
-                    name = member.get("nickname", "未知") if member else "未知"
-                except Exception:
-                    name = "未知"
-
+            name = group_member_map.get(qq, "未知")
             self.qq_list[qq] = name
             added.append(f"{name}({qq})")
 
         self._save_store_data()
 
+        # ③ 结果汇总
         msg = ""
         if added:
             msg += f"✅ 已成功添加：{'，'.join(added)}\n"
         if skipped:
-            msg += f"⚠️ 已存在：{'，'.join(skipped)}"
+            msg += f"⚠️ 已存在：{'，'.join(skipped)}\n"
+        if not_in_group:
+            msg += f"❌ 不在本群，未添加：{'，'.join(not_in_group)}"
 
         yield event.plain_result(msg.strip())
-
     # ================== no 指令 ==================
     @filter.command("xhh no")
     @filter.permission_type(PermissionType.ADMIN)
@@ -160,7 +175,6 @@ class XhhPlugin(Star):
 
     # ================== del 指令 ==================
     @filter.command("xhh del")
-    @filter.command("xhh delete")
     @filter.permission_type(PermissionType.ADMIN)
     async def xhh_del(self, event: AstrMessageEvent):
         args = (event.message_str or "").split()
