@@ -1,4 +1,5 @@
 import json
+import os
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
@@ -264,15 +265,19 @@ class XhhPlugin(Star):
             yield event.plain_result("🎉 当前群所有成员都已加入小红花名单")
             return
 
-        # 🔥 关键：用 At + chain_result
-        chain = [
-            Comp.Plain("📢 以下成员尚未加入小红花名单：\n")
-        ]
-
-        # ⚠️ 建议限制数量，防风控
-        for qq in not_in_list[:10]:
+        # 🔥 组合文字 + @
+        chain = [Comp.Plain("📢 以下成员尚未加入小红花名单：\n")]
+        for qq in not_in_list[:10]:  # 限制数量，防风控
             chain.append(Comp.At(qq=int(qq)))
 
+        # 先发送文字+@列表
         yield event.chain_result(chain)
+
+        # 发送固定图片 qrcode.jpg
+        current_dir = os.path.dirname(__file__)
+        image_path = os.path.join(current_dir, "qrcode.jpg")
+
+        if os.path.exists(image_path):
+            yield event.image_result(image_path)
     async def terminate(self):
         logger.info("xhh 插件已卸载")
