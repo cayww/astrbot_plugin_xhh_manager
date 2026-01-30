@@ -3,7 +3,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 from astrbot.core.star.filter.permission import PermissionType
-
+import astrbot.api.message_components as Comp
 
 @register("astrbot_plugin_xhh_manager", "cay", "小红花管理插件", "1.0.0")
 class XhhPlugin(Star):
@@ -57,8 +57,9 @@ class XhhPlugin(Star):
     async def xhh_help(self, event: AstrMessageEvent):
         yield event.plain_result(
             """📋 小红花管理插件帮助
---------------------
+    --------------------
 /xhh list        查看已保存 QQ
+/xhh at          艾特未加入名单的群成员
 /xhh has QQ号    查看指定QQ是否已添加
 /xhh del QQ号    删除 QQ（管理员）
 /xhh add QQ号    添加 QQ（管理员）
@@ -229,5 +230,49 @@ class XhhPlugin(Star):
             yield event.plain_result(f"✅ {name}({qq}) 已在小红花名单中")
         else:
             yield event.plain_result(f"❌ QQ({qq}) 不在小红花名单中")
+    # ================== at 指令 ==================
+    @filter.command("xhh at")
+    @filter.permission_type(PermissionType.ADMIN)
+    async def xhh_at(self, event: AstrMessageEvent):
+        group_id = str(event.get_group_id())
+        self._load_store_data(group_id)
+
+        bot = getattr(event, "bot", None)
+        if not bot:
+            yield event.plain_result("❌ 无法获取 Bot 实例")
+            return
+
+        try:
+            members = await bot.get_group_member_list(group_id=int(group_id))
+        except Exception as e:
+            logger.error(f"获取群成员失败: {e}")
+            yield event.plain_result("❌ 获取群成员失败")
+            return
+
+        bot_qq = str(event.get_self_id())
+
+        # 找出未加入名单的 QQ
+        not_in_list = [
+            str(m["user_id"])
+            for m in members
+            if m.get("user_id")
+            and str(m["user_id"]) != bot_qq
+            and str(m["user_id"]) not in self.qq_list
+        ]
+
+        if not not_in_list:
+            yield event.plain_result("🎉 当前群所有成员都已加入小红花名单")
+            return
+
+        # 🔥 关键：用 At + chain_result
+        chain = [
+            Comp.Plain("📢 以下成员尚未加入小红花名单：\n")
+        ]
+
+        # ⚠️ 建议限制数量，防风控
+        for qq in not_in_list[:10]:
+            chain.append(Comp.At(qq=int(qq)))
+
+        yield event.chain_result(chain)
     async def terminate(self):
         logger.info("xhh 插件已卸载")
