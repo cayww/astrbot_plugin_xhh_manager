@@ -5,7 +5,8 @@ from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 from astrbot.core.star.filter.permission import PermissionType
 import astrbot.api.message_components as Comp
-
+import aiohttp
+from urllib.parse import urlencode
 @register("astrbot_plugin_xhh_manager", "cay", "小红花管理插件", "1.0.0")
 class XhhPlugin(Star):
     def __init__(self, context: Context):
@@ -279,5 +280,156 @@ class XhhPlugin(Star):
 
         if os.path.exists(image_path):
             yield event.image_result(image_path)
+    # ================== exec 指令（执行固定命令行） ==================
+    @filter.command("xhh login", only_private=True)
+    async def xhh_exec(self, event: AstrMessageEvent):
+        if os.path.exists("/AstrBot/data/cache/qrcode.png"):
+            yield event.image_result("/AstrBot/data/cache/qrcode.png")
+
+    @filter.command("xhh valid", only_private=True)
+    async def xhh_validate(self, event: AstrMessageEvent):
+        qq = str(event.message_obj.sender.user_id)
+        if not qq:
+            yield event.plain_result("❌ 无法获取 QQ 号")
+            return
+
+        key = qq.zfill(10)  # 不满 10 位补 0
+        cookies_file = "/AstrBot/data/cache/cookies.json"
+
+        # 检查 cookies 文件
+        if not os.path.exists(cookies_file):
+            yield event.plain_result(f"❌ cookies 文件不存在: {cookies_file}")
+            return
+
+        try:
+            with open(cookies_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            yield event.plain_result(f"❌ 读取 cookies 文件失败: {e}")
+            return
+
+        cookies_str = data.get(key)
+        if not cookies_str:
+            yield event.plain_result(f"❌ QQ {qq} 的 cookies 未找到")
+            return
+
+        # 将 cookie 字符串转成字典
+        cookie_dict = {}
+        for item in cookies_str.split(";"):
+            if "=" in item:
+                k, v = item.strip().split("=", 1)
+                cookie_dict[k] = v
+
+        skey = cookie_dict.get("skey") or cookie_dict.get("p_skey")
+        if not skey:
+            yield event.plain_result("❌ cookies 中缺少 skey 或 p_skey")
+            return
+
+        bkn = get_bkn(skey)  # 你的 bkn 生成函数
+
+        # 构建请求 headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 16; V2307A Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.192 Mobile Safari/537.36 V1_AND_SQ_9.2.60_13010_YYB_D QQ/9.2.60.33425 NetType/WIFI",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"https://accounts.qq.com/report/center/welfare?_wv=16818977&_wwv=245888&from=7",
+            "Cookie": cookies_str,
+            "qname-service": "trpc.o3.impeach_activity.ImpeachActivity",
+            "qname-space": "Production",
+            "X-Requested-With": "com.tencent.mobileqq"
+        }
+
+        # 构建请求 URL
+        url = f"https://accounts.qq.com/report/center/proxy/domain/accounts.qq.com/v1/Impeach/SilenceQueryUserXhh?"
+
+        # 发送请求
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        yield event.plain_result(f"❌ 请求失败: HTTP {resp.status}")
+                        return
+                    data = await resp.json()
+            except Exception as e:
+                yield event.plain_result(f"❌ 请求异常: {e}")
+                return
+
+        yield event.plain_result(f"✅ QQ {qq} 举报状态:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
     async def terminate(self):
         logger.info("xhh 插件已卸载")
+def get_bkn(skey: str) -> int:
+    hash = 5381
+    for c in skey:
+        hash += (hash << 5) + ord(c)
+    return hash & 0x7fffffff
+
+
+
+    # @filter.command("xhh valid", only_private=True)
+    # async def xhh_validate(self, event: AstrMessageEvent):
+    #     qq = str(event.message_obj.sender.user_id)
+    #     if not qq:
+    #         yield event.plain_result("❌ 无法获取 QQ 号")
+    #         return
+
+    #     key = qq.zfill(10)  # 不满 10 位补 0
+    #     cookies_file = "/AstrBot/data/cache/cookies.json"
+
+    #     # 检查 cookies 文件
+    #     if not os.path.exists(cookies_file):
+    #         yield event.plain_result(f"❌ cookies 文件不存在: {cookies_file}")
+    #         return
+
+    #     try:
+    #         with open(cookies_file, "r", encoding="utf-8") as f:
+    #             data = json.load(f)
+    #     except Exception as e:
+    #         yield event.plain_result(f"❌ 读取 cookies 文件失败: {e}")
+    #         return
+
+    #     cookies_str = data.get(key)
+    #     if not cookies_str:
+    #         yield event.plain_result(f"❌ QQ {qq} 的 cookies 未找到")
+    #         return
+
+    #     # 将 cookie 字符串转成字典
+    #     cookie_dict = {}
+    #     for item in cookies_str.split(";"):
+    #         if "=" in item:
+    #             k, v = item.strip().split("=", 1)
+    #             cookie_dict[k] = v
+
+    #     skey = cookie_dict.get("skey") or cookie_dict.get("p_skey")
+    #     if not skey:
+    #         yield event.plain_result("❌ cookies 中缺少 skey 或 p_skey")
+    #         return
+
+    #     bkn = get_bkn(skey)
+
+    #     # 构建请求 headers
+    #     headers = {
+    #         "User-Agent": "Mozilla/5.0 (Linux; Android 16; V2307A Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.192 Mobile Safari/537.36 V1_AND_SQ_9.2.60_13010_YYB_D QQ/9.2.60.33425 NetType/WIFI",
+    #         "Accept": "application/json, text/plain, */*",
+    #         "Referer": f"https://accounts.qq.com/report/center/mine/detail?_wv=2&sid={qq}",
+    #         "Cookie": cookies_str
+    #     }
+
+    #     # 构建请求 URL
+    #     params = {
+    #         "bkn": bkn,
+    #         "sequence_id": get_bkn(cookie_dict['skey'])  # 可根据需要修改
+    #     }
+    #     url = f"https://accounts.qq.com/report/center/proxy/domain/accounts.qq.com/v1/record/GetImpeachDetail?{urlencode(params)}"
+    #     logger.info(url)
+    #     # 发送请求
+    #     async with aiohttp.ClientSession() as session:
+    #         try:
+    #             async with session.get(url, headers=headers) as resp:
+    #                 if resp.status != 200:
+    #                     yield event.plain_result(f"❌ 请求失败: HTTP {resp.status}")
+    #                     return
+    #                 data = await resp.json()
+    #         except Exception as e:
+    #             yield event.plain_result(f"❌ 请求异常: {e}")
+    #             return
+
+    #     yield event.plain_result(f"✅ QQ {qq} 举报详情:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
