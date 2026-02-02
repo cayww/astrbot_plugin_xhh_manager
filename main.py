@@ -281,11 +281,12 @@ class XhhPlugin(Star):
         if os.path.exists(image_path):
             yield event.image_result(image_path)
     # ================== exec 指令（执行固定命令行） ==================
-    @filter.command("xhh login", only_private=True)
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @filter.command("xhh login")
     async def xhh_exec(self, event: AstrMessageEvent):
         if os.path.exists("/AstrBot/data/cache/qrcode.png"):
             yield event.image_result("/AstrBot/data/cache/qrcode.png")
-
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("xhh valid", only_private=True)
     async def xhh_validate(self, event: AstrMessageEvent):
         qq = str(event.message_obj.sender.user_id)
