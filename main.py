@@ -290,9 +290,14 @@ class XhhPlugin(Star):
             return
         current_dir = os.path.dirname(__file__)
         image_path = os.path.join(current_dir, "qrcode.jpg")
-
+        pic1_path = os.path.join(current_dir, "pic_1.jpg")
+        pic2_path = os.path.join(current_dir, "pic_2.jpg")
         if os.path.exists(image_path):
             yield event.image_result(image_path)
+            yield event.image_result("扫码后发送下面两张示例图片")
+            yield event.image_result(pic1_path)
+            yield event.image_result(pic2_path)
+            
     # ================== exec 指令（执行固定命令行） ==================
     # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     # @filter.command("xhh login")
