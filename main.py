@@ -301,158 +301,65 @@ class XhhPlugin(Star):
             yield event.plain_result("扫码后发送下面两张示例图片")
             yield event.image_result(pic1_path)
             yield event.image_result(pic2_path)
-            
-    # ================== exec 指令（执行固定命令行） ==================
-    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
-    # @filter.command("xhh login")
-    # async def xhh_exec(self, event: AstrMessageEvent):
-    #     if os.path.exists("/AstrBot/data/cache/qrcode.png"):
-    #         yield event.image_result("/AstrBot/data/cache/qrcode.png")
-    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
-    # @filter.command("xhh valid", only_private=True)
-    # async def xhh_validate(self, event: AstrMessageEvent):
-    #     qq = str(event.message_obj.sender.user_id)
-    #     if not qq:
-    #         yield event.plain_result("❌ 无法获取 QQ 号")
-    #         return
+    # ================== migrate 指令 ==================
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("xhh migrate")
+    async def xhh_migrate(self, event: AstrMessageEvent):
+        """
+        迁移 QQ 数据：从源群迁移到目标群，仅迁移两个群都存在的 QQ。
+        用法: /xhh migrate 源群号 目标群号
+        """
+        args = (event.message_str or "").split()
+        if len(args) < 3:
+            yield event.plain_result("❌ 用法：/xhh migrate 源群号 目标群号")
+            return
 
-    #     key = qq.zfill(10)  # 不满 10 位补 0
-    #     cookies_file = "/AstrBot/data/cache/cookies.json"
+        src_group_id = args[2]
+        dst_group_id = args[3]
 
-    #     # 检查 cookies 文件
-    #     if not os.path.exists(cookies_file):
-    #         yield event.plain_result(f"❌ cookies 文件不存在: {cookies_file}")
-    #         return
+        bot = getattr(event, "bot", None)
+        if not bot:
+            yield event.plain_result("❌ 无法获取 Bot 实例")
+            return
 
-    #     try:
-    #         with open(cookies_file, "r", encoding="utf-8") as f:
-    #             data = json.load(f)
-    #     except Exception as e:
-    #         yield event.plain_result(f"❌ 读取 cookies 文件失败: {e}")
-    #         return
+        # ① 加载源群 QQ 数据
+        self._load_store_data(src_group_id)
+        src_qq_list = self.qq_list.copy()
+        if not src_qq_list:
+            yield event.plain_result(f"❌ 源群 {src_group_id} 没有 QQ 数据")
+            return
 
-    #     cookies_str = data.get(key)
-    #     if not cookies_str:
-    #         yield event.plain_result(f"❌ QQ {qq} 的 cookies 未找到")
-    #         return
+        # ② 获取目标群成员列表
+        try:
+            dst_members = await bot.get_group_member_list(group_id=int(dst_group_id))
+            dst_member_map = {str(m["user_id"]): m.get("nickname", "未知") for m in dst_members if m.get("user_id")}
+        except Exception as e:
+            logger.error(f"获取目标群成员失败: {e}")
+            yield event.plain_result(f"❌ 获取目标群 {dst_group_id} 成员失败")
+            return
 
-    #     # 将 cookie 字符串转成字典
-    #     cookie_dict = {}
-    #     for item in cookies_str.split(";"):
-    #         if "=" in item:
-    #             k, v = item.strip().split("=", 1)
-    #             cookie_dict[k] = v
+        # ③ 获取源群成员列表（仅用于校验是否存在目标群）
+        try:
+            src_members = await bot.get_group_member_list(group_id=int(src_group_id))
+            src_member_set = {str(m["user_id"]) for m in src_members if m.get("user_id")}
+        except Exception as e:
+            logger.error(f"获取源群成员失败: {e}")
+            yield event.plain_result(f"❌ 获取源群 {src_group_id} 成员失败")
+            return
 
-    #     skey = cookie_dict.get("skey") or cookie_dict.get("p_skey")
-    #     if not skey:
-    #         yield event.plain_result("❌ cookies 中缺少 skey 或 p_skey")
-    #         return
+        # ④ 迁移：只迁移两个群都存在的 QQ
+        migrated = []
+        self._load_store_data(dst_group_id)  # 切换到目标群
+        for qq, name in src_qq_list.items():
+            if qq in src_member_set and qq in dst_member_map:
+                self.qq_list[qq] = dst_member_map.get(qq, name)
+                migrated.append(f"{self.qq_list[qq]}({qq})")
 
-    #     bkn = get_bkn(skey) 
-
-    #     # 构建请求 headers
-    #     headers = {
-    #         "User-Agent": "Mozilla/5.0 (Linux; Android 16; V2307A Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.192 Mobile Safari/537.36 V1_AND_SQ_9.2.60_13010_YYB_D QQ/9.2.60.33425 NetType/WIFI",
-    #         "Accept": "application/json, text/plain, */*",
-    #         "Referer": f"https://accounts.qq.com/report/center/welfare?_wv=16818977&_wwv=245888&from=7",
-    #         "Cookie": cookies_str,
-    #         "qname-service": "trpc.o3.impeach_activity.ImpeachActivity",
-    #         "qname-space": "Production",
-    #         "X-Requested-With": "com.tencent.mobileqq"
-    #     }
-
-    #     # 构建请求 URL
-    #     url = f"https://accounts.qq.com/report/center/proxy/domain/accounts.qq.com/v1/Impeach/SilenceQueryUserXhh?"
-
-    #     # 发送请求
-    #     async with aiohttp.ClientSession() as session:
-    #         try:
-    #             async with session.get(url, headers=headers) as resp:
-    #                 if resp.status != 200:
-    #                     yield event.plain_result(f"❌ 请求失败: HTTP {resp.status}")
-    #                     return
-    #                 data = await resp.json()
-    #         except Exception as e:
-    #             yield event.plain_result(f"❌ 请求异常: {e}")
-    #             return
-
-    #     yield event.plain_result(f"✅ QQ {qq} 举报状态:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+        if migrated:
+            self._save_store_data()
+            yield event.plain_result(f"✅ 成功迁移 {len(migrated)} 个 QQ 到目标群 {dst_group_id}：\n" + "\n".join(migrated))
+        else:
+            yield event.plain_result("⚠️ 没有 QQ 可以迁移（可能目标群未包含源群成员）")
     async def terminate(self):
         logger.info("xhh 插件已卸载")
-def get_bkn(skey: str) -> int:
-    hash = 5381
-    for c in skey:
-        hash += (hash << 5) + ord(c)
-    return hash & 0x7fffffff
-
-
-
-    # @filter.command("xhh valid", only_private=True)
-    # async def xhh_validate(self, event: AstrMessageEvent):
-    #     qq = str(event.message_obj.sender.user_id)
-    #     if not qq:
-    #         yield event.plain_result("❌ 无法获取 QQ 号")
-    #         return
-
-    #     key = qq.zfill(10)  # 不满 10 位补 0
-    #     cookies_file = "/AstrBot/data/cache/cookies.json"
-
-    #     # 检查 cookies 文件
-    #     if not os.path.exists(cookies_file):
-    #         yield event.plain_result(f"❌ cookies 文件不存在: {cookies_file}")
-    #         return
-
-    #     try:
-    #         with open(cookies_file, "r", encoding="utf-8") as f:
-    #             data = json.load(f)
-    #     except Exception as e:
-    #         yield event.plain_result(f"❌ 读取 cookies 文件失败: {e}")
-    #         return
-
-    #     cookies_str = data.get(key)
-    #     if not cookies_str:
-    #         yield event.plain_result(f"❌ QQ {qq} 的 cookies 未找到")
-    #         return
-
-    #     # 将 cookie 字符串转成字典
-    #     cookie_dict = {}
-    #     for item in cookies_str.split(";"):
-    #         if "=" in item:
-    #             k, v = item.strip().split("=", 1)
-    #             cookie_dict[k] = v
-
-    #     skey = cookie_dict.get("skey") or cookie_dict.get("p_skey")
-    #     if not skey:
-    #         yield event.plain_result("❌ cookies 中缺少 skey 或 p_skey")
-    #         return
-
-    #     bkn = get_bkn(skey)
-
-    #     # 构建请求 headers
-    #     headers = {
-    #         "User-Agent": "Mozilla/5.0 (Linux; Android 16; V2307A Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.192 Mobile Safari/537.36 V1_AND_SQ_9.2.60_13010_YYB_D QQ/9.2.60.33425 NetType/WIFI",
-    #         "Accept": "application/json, text/plain, */*",
-    #         "Referer": f"https://accounts.qq.com/report/center/mine/detail?_wv=2&sid={qq}",
-    #         "Cookie": cookies_str
-    #     }
-
-    #     # 构建请求 URL
-    #     params = {
-    #         "bkn": bkn,
-    #         "sequence_id": get_bkn(cookie_dict['skey'])  # 可根据需要修改
-    #     }
-    #     url = f"https://accounts.qq.com/report/center/proxy/domain/accounts.qq.com/v1/record/GetImpeachDetail?{urlencode(params)}"
-    #     logger.info(url)
-    #     # 发送请求
-    #     async with aiohttp.ClientSession() as session:
-    #         try:
-    #             async with session.get(url, headers=headers) as resp:
-    #                 if resp.status != 200:
-    #                     yield event.plain_result(f"❌ 请求失败: HTTP {resp.status}")
-    #                     return
-    #                 data = await resp.json()
-    #         except Exception as e:
-    #             yield event.plain_result(f"❌ 请求异常: {e}")
-    #             return
-
-    #     yield event.plain_result(f"✅ QQ {qq} 举报详情:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
