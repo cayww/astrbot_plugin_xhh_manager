@@ -361,5 +361,78 @@ class XhhPlugin(Star):
             yield event.plain_result(f"✅ 成功迁移 {len(migrated)} 个 QQ 到目标群 {dst_group_id}：\n" + "\n".join(migrated))
         else:
             yield event.plain_result("⚠️ 没有 QQ 可以迁移（可能目标群未包含源群成员）")
+    # ================== addg 指令（私聊指定群添加） ==================
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("xhh addg", only_private=True)
+    async def xhh_add_group(self, event: AstrMessageEvent):
+        """
+        私聊添加指定群的小红花名单
+        用法: /xhh addg 群号 QQ号 [QQ号...]
+        """
+        args = (event.message_str or "").split()
+        if len(args) < 4:
+            yield event.plain_result("❌ 用法：/xhh addg 群号 QQ号 [QQ号...]")
+            return
+
+        group_id = args[2]
+        qq_list = args[3:]
+
+        if not group_id.isdigit():
+            yield event.plain_result("❌ 群号格式错误")
+            return
+
+        bot = getattr(event, "bot", None)
+        if not bot:
+            yield event.plain_result("❌ 无法获取 Bot 实例")
+            return
+
+        # ① 获取目标群成员
+        try:
+            members = await bot.get_group_member_list(group_id=int(group_id))
+            group_member_map = {
+                str(m.get("user_id")): m.get("nickname", "未知")
+                for m in members
+                if m.get("user_id")
+            }
+        except Exception as e:
+            logger.error(f"获取群成员失败: {e}")
+            yield event.plain_result(f"❌ 获取群 {group_id} 成员失败，可能权限不足或未加入该群")
+            return
+
+        # ② 加载目标群数据
+        self._load_store_data(group_id)
+
+        added, skipped, not_in_group = [], [], []
+
+        for qq in qq_list:
+            if not qq.isdigit():
+                continue
+
+            if qq not in group_member_map:
+                not_in_group.append(qq)
+                continue
+
+            if qq in self.qq_list:
+                skipped.append(f"{self.qq_list[qq]}({qq})")
+                continue
+
+            name = group_member_map.get(qq, "未知")
+            self.qq_list[qq] = name
+            added.append(f"{name}({qq})")
+
+        if added:
+            self._save_store_data()
+
+        # ③ 结果汇总
+        msg = ""
+        if added:
+            msg += f"✅ 已成功添加到群 {group_id}：{'，'.join(added)}\n"
+        if skipped:
+            msg += f"⚠️ 已存在：{'，'.join(skipped)}\n"
+        if not_in_group:
+            msg += f"❌ 不在该群，未添加：{'，'.join(not_in_group)}"
+
+        yield event.plain_result(msg.strip())
     async def terminate(self):
         logger.info("xhh 插件已卸载")
